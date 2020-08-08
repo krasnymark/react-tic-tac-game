@@ -2,6 +2,8 @@ import React from 'react';
 import './App.css';
 import {Board} from './Board.js';
 
+const directions = [{x: 0, y: 1}, {x: 1, y: 0}, {x: 1, y: 1}, {x: 1, y: -1}];
+
 class Square {
   constructor(props) {
     console.log(props);
@@ -15,19 +17,21 @@ class Square {
 export class Game extends React.Component {
   constructor(props) {
     super(props);
+    const win = props.win;
     const dim = props.dim;
-    console.log('dim: ' + dim);
-    this.state = this.getInitialState(dim);
+    console.log('Game win: ', win, ' dim: ', dim);
+    this.state = this.getInitialState(win, dim);
   }
 
-  getInitialState(dim) {
-    console.log('getInitialState dim: ' + dim);
+  getInitialState(win, dim) {
+    console.log('getInitialState dim: ' + dim, ' win: ', win);
     return {
+      win: win,
       dim: dim,
-      lines: this.getWinningLines(dim),
       history: [
         {
-          squares: Array(dim * dim).fill(null)
+          squares: Array(dim * dim).fill(null),
+          winner: null
         }
       ],
       moves: [],
@@ -39,29 +43,38 @@ export class Game extends React.Component {
 
   handleDimChange = (event) => {
     const dim = parseInt(event.target.value);
-    this.setState(this.getInitialState(dim));
+    this.setState(this.getInitialState(this.state.win, dim));
   }
 
+  handleWinChange = (event) => {
+    const win = parseInt(event.target.value);
+    this.setState(this.getInitialState(win, this.state.dim));
+  }
+  
   handleClick(i, x, y) {
     const moves = this.state.moves.slice(0, this.state.stepNumber);
     const history = this.state.history.slice(0, this.state.stepNumber + 1);
     const current = history[history.length - 1];
-    const squares = current.squares.slice();
-    if (this.calculateWinner(squares) || squares[i]) {
+    const squares = current.squares.map(a => a ? ({...a}) : null); // .slice()
+    const player = this.state.xIsNext ? 'X' : 'O';
+    if (squares[i] || current.winner) { // the square was taken
       return;
     }
-    squares[i] = new Square({value: this.state.xIsNext ? 'X' : 'O', x: x, y: y});
+    squares[i] = new Square({value: player, x: x, y: y});
+    const winner = this.calculateWinner(squares, x, y);
     this.setState({
       history: history.concat([
         {
-          squares: squares
+          squares: squares,
+          winner: winner
         }
       ]),
       moves: moves.concat([ squares[i] ]),
       stepNumber: history.length,
-      xIsNext: !this.state.xIsNext
+      xIsNext: !this.state.xIsNext,
     });
   }
+
   toggleOrder = () => {
     this.setState({isAsc: !this.state.isAsc});
   }
@@ -69,53 +82,74 @@ export class Game extends React.Component {
   jumpTo(step) {
     this.setState({
       stepNumber: step,
-      xIsNext: (step % 2) === 0
+      xIsNext: (step % 2) === 0,
     });
   }
 
-  getWinningLines(dim) {
-    // Define lines dynamically and cache
-    console.log('initWinningLines');
-    const lines = [];
-    const numR = [...Array(dim).keys()];
-    numR.forEach(x => lines.push(numR.map(y => x * dim + y))); // h
-    numR.forEach(x => lines.push(numR.map(y => x + y * dim))); // v
-    let d = 0;
-    const d1 = [];
-    numR.forEach(x => {d1.push(d); d += dim + 1;});
-    lines.push(d1);
-    d = dim - 1;
-    const d2 = [];
-    numR.forEach(x => {d2.push(d); d += dim - 1;});
-    lines.push(d2);
-    console.log(lines);
-    return lines;
+  // Move from point p in direction d and return new point
+  move(p, d) {
+    return {x: p.x + d.x, y: p.y + d.y};
+  }
+  // Reverse direction
+  reverse(d) {
+    return {x: -d.x, y: -d.y};
+  }
+  // Get square at point p
+  getSquare(squares, p) {
+    const ix = p.y * this.state.dim + p.x;
+    return squares[ix];
+  }
+  getPlayer(square) {
+    return square && square.value;
+  }
+  // Is point within bounds
+  isValid(p) {
+    return 0 <= p.x && p.x < this.state.dim && 0 <= p.y && p.y < this.state.dim;
   }
 
-  calculateWinner(squares) {
-    squares.forEach(s => {if (s) s.winning = false;});
-    for (let i = 0; i < this.state.lines.length; i++) {
-      const line = this.state.lines[i];
-      let xCount = 0;
-      let oCount = 0;
-      line.forEach(i => {
-        if (squares[i] && squares[i].value === 'X') xCount++;
-        if (squares[i] && squares[i].value === 'O') oCount++;
-    })
-    const winner = xCount === this.state.dim ? 'X' :
-                   oCount === this.state.dim ? 'O' : null;
-      if (winner) {
-        line.forEach(i => squares[i].winning = true);
-        return winner;
+  calculateWinner(squares, x, y) {
+    // Starting from i check neighbor squares until hit other player or border. Repeat for 4 directions (0,1), (1,0), (1,1), (1,-1) - L-R, Up-Dn, D1, D2
+    const start = {x: x, y: y};
+    const player = this.getPlayer(this.getSquare(squares, start));
+    let winner = null;
+    directions.forEach(d => {
+      let dd = d;
+      let pp = start;
+      let reversed = false;
+      let count = 0;
+      while (!winner) {
+        const square = this.getSquare(squares, pp);
+        if (this.isValid(pp) && this.getPlayer(square) === player) {
+          count++;
+          square.winning = true; // Mark as we go
+          if (count === this.state.win) {
+            winner = player;
+            console.log('winner: ', winner);
+          } else {
+            pp = this.move(pp, dd);
+          }
+        } else if (!reversed) {
+          dd = this.reverse(d);
+          reversed = true; // Reverse just once
+          pp = start;
+          count--; // Not to double count start
+        } else {
+          count = 0;
+          this.clearWinnerMark(squares);
+          break;
+        }
       }
-    }
-    return null;
+    });
+    return winner;
+  }
+  clearWinnerMark(squares) {
+    squares.filter(s => s != null).forEach(s => s.winning = false);
   }
 
   render() {
     const history = this.state.history;
     const current = history[this.state.stepNumber];
-    const winner = this.calculateWinner(current.squares);
+    const winner = current.winner;
     console.log('Game.render');
     const moves = history.map((step, move) => {
       console.log(move);
@@ -151,6 +185,8 @@ export class Game extends React.Component {
         <div className="game-board">
           <label>Dim:</label>
           <input type="number" value={this.state.dim} onChange={this.handleDimChange} className="game-dim"></input>
+          <label>Win:</label>
+          <input type="number" value={this.state.win} onChange={this.handleWinChange} className="game-dim"></input>
           <Board
             dim={this.state.dim}
             squares={current.squares}
