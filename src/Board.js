@@ -1,5 +1,4 @@
 import React from 'react';
-
 import './App.css';
 
 function Square(props) {
@@ -18,15 +17,15 @@ export class Board extends React.Component {
     console.log('Board dim: ' + this.state.dim);
   }
   renderSquare(i, x, y) {
-    if (this.props.squares[i])
-      console.log('renderSquare: ' + i + ' - ' + JSON.stringify(this.props.squares[i]));
+    const square = this.props.squares[i];
+    // if (square) console.log('renderSquare: ' + i + ' - ' + JSON.stringify(square));
     const key = JSON.stringify({x: x, y: y});
     return (
       <Square
         key={key}
-        value={this.props.squares[i] ? this.props.squares[i].value : null}
-        winning={this.props.squares[i] ? this.props.squares[i].winning : false}
-        onClick={() => this.props.onClick(i, x, y)}
+        value={square ? square.value : null}
+        winning={square ? square.winning : false}
+        onClick={() => this.props.onClick(x, y)}
       />
     );
   }

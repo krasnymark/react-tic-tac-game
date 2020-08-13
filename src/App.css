@@ -56,7 +56,7 @@ ol, ul {
 .game-dim {
   width: 50px;
   margin: 5px;
-  margin-bottom: 30px;
+  margin-bottom: 10px;
 }
 .button {
   margin: 5px;
@@ -69,12 +69,12 @@ ol, ul {
   font-size: 24px;
   font-weight: bold;
   line-height: 34px;
+  width: 34px;
   height: 34px;
   margin-right: -1px;
   margin-top: -1px;
   padding: 0;
   text-align: center;
-  width: 34px;
 }
 .winning {
   color: red;
@@ -95,7 +95,18 @@ ol, ul {
   flex-direction: row;
 }
 
+.game-board {
+  display: flex;
+  flex-direction: column;
+}
+
 .game-info {
   margin-left: 20px;
   text-align: left;
+}
+.game-select {
+  color: blue;
+  width: 100%;
+  margin-top: 5px;
+  margin-bottom: 5px;
 }
