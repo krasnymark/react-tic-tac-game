@@ -1,14 +1,23 @@
 import React from 'react';
+import Select from 'react-select';
 import './App.css';
 import {Board} from './Board.js';
+import {Utils} from './Utils.js'
+import {patterns} from './Data.json'
 
 const directions = [{x: 0, y: 1}, {x: 1, y: 0}, {x: 1, y: 1}, {x: 1, y: -1}];
+const levels = [
+  { value: 'random', label: 'Random' },
+  { value: 'stupid', label: 'Stupid' },
+  { value: 'beginner', label: 'Beginner' }
+]
 
 class Square {
   constructor(props) {
     console.log(props);
     this.value = props ? props.value : null;
     this.winning = props ? props.winning : false;
+    this.i = props.i;
     this.x = props.x;
     this.y = props.y;
   }
@@ -17,20 +26,21 @@ class Square {
 export class Game extends React.Component {
   constructor(props) {
     super(props);
-    const win = props.win;
     const dim = props.dim;
-    console.log('Game win: ', win, ' dim: ', dim);
-    this.state = this.getInitialState(win, dim);
+    const win = props.win;
+    console.log('Game dim: ', dim, ' win: ', win);
+    this.state = this.getInitialState(dim, win);
   }
 
-  getInitialState(win, dim) {
+  getInitialState(dim, win) {
     console.log('getInitialState dim: ' + dim, ' win: ', win);
     return {
-      win: win,
       dim: dim,
+      win: win,
       history: [
         {
           squares: Array(dim * dim).fill(null),
+          chains: {o: [], x: []},
           winner: null
         }
       ],
@@ -38,6 +48,9 @@ export class Game extends React.Component {
       stepNumber: 0,
       xIsNext: true,
       isAsc: true,
+      xIsHuman: true,
+      oIsHuman: false,
+      playerLevel: levels[2]
     }
   }
 
@@ -45,22 +58,32 @@ export class Game extends React.Component {
     const dim = parseInt(event.target.value);
     this.setState(this.getInitialState(this.state.win, dim));
   }
-
   handleWinChange = (event) => {
     const win = parseInt(event.target.value);
     this.setState(this.getInitialState(win, this.state.dim));
   }
-  
-  handleClick(i, x, y) {
+  handleLevelChange(playerLevel) {
+    console.log('playerLevel: ', playerLevel);
+    this.setState({
+      playerLevel: playerLevel
+    });
+  }
+
+  handleClick(x, y) {
+    this.makeMove(x, y);
+  }
+  makeMove(x, y) {
     const moves = this.state.moves.slice(0, this.state.stepNumber);
     const history = this.state.history.slice(0, this.state.stepNumber + 1);
     const current = history[history.length - 1];
-    const squares = current.squares.map(a => a ? ({...a}) : null); // .slice()
+    const squares = current.squares.map(a => a ? ({...a}) : null); // this.getCopyOfCurrentSquares(); // getCurrentSquares()
     const player = this.state.xIsNext ? 'X' : 'O';
+    const point = {x: x, y: y};
+    const i = this.getSquareNumber(point);
     if (squares[i] || current.winner) { // the square was taken
       return;
     }
-    squares[i] = new Square({value: player, x: x, y: y});
+    squares[i] = new Square({i: i, x: x, y: y, value: player});
     const winner = this.calculateWinner(squares, x, y);
     this.setState({
       history: history.concat([
@@ -72,13 +95,27 @@ export class Game extends React.Component {
       moves: moves.concat([ squares[i] ]),
       stepNumber: history.length,
       xIsNext: !this.state.xIsNext,
+    }, () => {
+      this.afterSetStateFinished();
     });
   }
 
-  toggleOrder = () => {
-    this.setState({isAsc: !this.state.isAsc});
+  afterSetStateFinished() {
+    if ((this.state.xIsNext && !this.state.xIsHuman) || (!this.state.xIsNext && !this.state.oIsHuman)) {
+      setTimeout(() => {
+        const p = this.calculateNextMove();
+        if (p) {
+          this.makeMove(p.x, p.y);
+        } else {
+          console.log('no moves available'); // TODO - draw?
+        }
+      }, 10); // TODO - add transition
+    }
   }
 
+  toggleMoveOrder = () => {
+    this.setState({isAsc: !this.state.isAsc});
+  }
   jumpTo(step) {
     this.setState({
       stepNumber: step,
@@ -86,18 +123,18 @@ export class Game extends React.Component {
     });
   }
 
-  // Move from point p in direction d and return new point
-  move(p, d) {
-    return {x: p.x + d.x, y: p.y + d.y};
+  getCurrentSquares() {
+    return this.state.history[this.state.stepNumber].squares.slice(); // shallow
   }
-  // Reverse direction
-  reverse(d) {
-    return {x: -d.x, y: -d.y};
+  getCopyOfCurrentSquares() {
+    return this.state.history[this.state.stepNumber].squares.map(a => a ? ({...a}) : null); // deep
   }
   // Get square at point p
+  getSquareNumber(p) {
+    return p.y * this.state.dim + p.x;
+  }
   getSquare(squares, p) {
-    const ix = p.y * this.state.dim + p.x;
-    return squares[ix];
+    return this.isValid(p) ? squares[this.getSquareNumber(p)] : undefined;
   }
   getPlayer(square) {
     return square && square.value;
@@ -105,6 +142,120 @@ export class Game extends React.Component {
   // Is point within bounds
   isValid(p) {
     return 0 <= p.x && p.x < this.state.dim && 0 <= p.y && p.y < this.state.dim;
+  }
+
+  availableMoves() {
+    return this.getCurrentSquares().filter(s => s == null);
+  }
+  calculateNextMove(squares) {
+    if (this.availableMoves()) {
+      switch(this.state.playerLevel.value) {
+        case 'random':
+          return this.randomMove();
+        case 'stupid':
+          return this.stupidMove();
+        case 'beginner':
+          return this.beginnerMove();
+        default:
+          return null;
+      }
+    } else {
+      console.log('no moves available'); // TODO - draw?
+    }
+  }
+  randomMove() {
+    if (this.availableMoves()) {
+      const squares = this.getCurrentSquares();
+      while (true) {
+        const p = {x: Utils.random(this.state.dim), y: Utils.random(this.state.dim)};
+        if (this.getSquare(squares, p) == null) {
+          return p;
+        }
+      }
+    } else {
+      return null;
+    }
+  }
+  stupidMove() {
+    const lastMove = this.getLastMove();
+    console.log('lastMove: ', lastMove);
+    const squares = this.getCurrentSquares();
+    let move = this.findMoveInDir(squares, lastMove, directions);
+    if (move == null) {
+      move = this.findMoveInDir(squares, lastMove, directions.map(d => Utils.reverse(d)));
+    }
+    return move ? move : this.randomMove();
+  }
+  getLastMove() {
+    return this.state.moves[this.state.stepNumber-1];
+  }
+  // find available move from point in direction
+  findMoveInDir(squares, point, dir) {
+    const dirs = Utils.shuffle(dir);
+    const d = dirs.find(d => {
+      const mm = Utils.move(point, d);
+      return this.getSquare(squares, mm) == null;
+    });
+    return d ? Utils.move(point, d) : null;
+  }
+  beginnerMove() {
+    const move = this.bestBeginnerMove();
+    return move ? move : this.stupidMove();
+  }
+  // Best beginner move
+  bestBeginnerMove() {
+    const lastMove = this.getLastMove();
+    let bestMove = {rank: -1};
+    directions.forEach(dir => {
+      const move = this.bestBeginnerMoveInDir(lastMove, dir);
+      if (move.rank > bestMove.rank) {
+        bestMove = move; // {point: move.point, rank: move.rank};
+      }
+    });
+    return bestMove.point; // Utils.move(lastMove, bestMove.dir, bestMove.shift); // moves.reduce((m1,m2) => (m1.rank > m2.rank) ? m1 : m2) // return moves.sort((m1,m2) => m2.rank - m1.rank); // Highest first
+  }
+  // Defence - reacting only to the opponent's moves
+  bestBeginnerMoveInDir(point, dir) {
+    const line = this.patternInDir(point, dir);
+    const pattern = patterns[line.pattern];
+    console.log('pattern: ', line, ' => ', pattern);
+    const move = pattern ? {point: Utils.move(point, dir, line.shift + pattern.move), rank: pattern.rank} : this.stupidMove();
+    return move;
+  }
+  patternInDir(point, dir) {
+    const squares = this.getCurrentSquares();
+    const square = this.getSquare(squares, point);
+    const player = this.getPlayer(square);
+    const line = {
+      pattern: '',
+      shift: 1 - this.state.win // index in relation to start, point => 0
+    };
+    let start = Utils.move(point, dir, line.shift);
+    for (let ix = 0; ix < this.state.win * 2 - 1; ix++) {
+      const lineSquare = this.getSquare(squares, Utils.move(start, dir, ix));
+      const squareValue = lineSquare === undefined ? -1 // off bounds
+                        : lineSquare === null ? 0 // empty square
+                        : lineSquare.value === player ? 1 : -1;  // opponent
+      if (squareValue < 0) {
+        // Mid-point is always 1
+        if (ix < this.state.win) {
+          line.pattern = ''; // start over after opponent or boundary
+          line.shift = ix - this.state.win + 2; // shift from origin
+        } else {
+          break;
+        }
+      } else {
+        line.pattern += squareValue ? '1' : '_';
+      }
+    }
+    Utils.trim(line);
+    line.pattern = '$' + line.pattern;
+    return line;
+  }
+  calcChainsBruteForce(player) {
+    const squares = this.getCurrentSquares();
+    const playerSquares = squares.filter(s => s != null && s.value === player);
+    console.log('playerSquares: ', playerSquares);
   }
 
   calculateWinner(squares, x, y) {
@@ -126,10 +277,10 @@ export class Game extends React.Component {
             winner = player;
             console.log('winner: ', winner);
           } else {
-            pp = this.move(pp, dd);
+            pp = Utils.move(pp, dd);
           }
         } else if (!reversed) {
-          dd = this.reverse(d);
+          dd = Utils.reverse(d);
           reversed = true; // Reverse just once
           pp = start;
           count--; // Not to double count start
@@ -152,8 +303,7 @@ export class Game extends React.Component {
     const winner = current.winner;
     console.log('Game.render');
     const moves = history.map((step, move) => {
-      console.log(move);
-      console.log(step);
+      console.log('move: ', move, ' state: ', step);
       const m = this.state.moves[move-1];
       const x = move ? m.x : -1;
       const y = move ? m.y : -1;
@@ -170,7 +320,6 @@ export class Game extends React.Component {
     }).sort((m1,m2) => (m1.key - m2.key) * this.state.isAsc ? -1 : 1);
     const start = this.state.isAsc ? 0 : moves.length-1;
     const reversed = this.state.isAsc ? '' : 'reversed';
-
     let status;
     if (winner) {
       status = "Winner: " + winner;
@@ -183,20 +332,26 @@ export class Game extends React.Component {
     return (
       <div className="game">
         <div className="game-board">
-          <label>Dim:</label>
-          <input type="number" value={this.state.dim} onChange={this.handleDimChange} className="game-dim"></input>
-          <label>Win:</label>
-          <input type="number" value={this.state.win} onChange={this.handleWinChange} className="game-dim"></input>
-          <Board
-            dim={this.state.dim}
-            squares={current.squares}
-            onClick={(i,x,y) => this.handleClick(i, x, y)}
-          />
+          <div className="game-settings">
+            <label>Level:</label>
+            <Select options={levels} defaultValue={this.state.playerLevel} onChange={(event) => this.handleLevelChange(event)} className="game-select"/>
+            <label>Dim:</label>
+            <input type="number" value={this.state.dim} onChange={this.handleDimChange} className="game-dim"></input>
+            <label>Win:</label>
+            <input type="number" value={this.state.win} onChange={this.handleWinChange} className="game-dim"></input>
+          </div>
+          <div className="game-board">
+            <Board
+              dim={this.state.dim}
+              squares={current.squares}
+              onClick={(x,y) => this.handleClick(x, y)}
+            />
+          </div>
         </div>
         <div className="game-info">
           <div>{status}</div>
           Moves:
-          <button type="button" className="button" onClick={this.toggleOrder}>{this.state.isAsc ? 'Asc' : 'Desc'}</button>
+          <button type="button" className="button" onClick={this.toggleMoveOrder}>{this.state.isAsc ? 'Asc' : 'Desc'}</button>
           <ol start={start} reversed={reversed}>{moves}</ol>
         </div>
       </div>
