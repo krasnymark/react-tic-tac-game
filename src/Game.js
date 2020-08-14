@@ -3,7 +3,7 @@ import Select from 'react-select';
 import './App.css';
 import {Board} from './Board.js';
 import {Utils} from './Utils.js'
-import {patterns} from './Data.json'
+import {patterns} from './Patterns.json'
 
 const directions = [{x: 0, y: 1}, {x: 1, y: 0}, {x: 1, y: 1}, {x: 1, y: -1}];
 const levels = [
@@ -40,11 +40,11 @@ export class Game extends React.Component {
       history: [
         {
           squares: Array(dim * dim).fill(null),
-          chains: {o: [], x: []},
           winner: null
         }
       ],
       moves: [],
+      chains: {x: [], o: []},
       stepNumber: 0,
       xIsNext: true,
       isAsc: true,
@@ -77,7 +77,7 @@ export class Game extends React.Component {
     const history = this.state.history.slice(0, this.state.stepNumber + 1);
     const current = history[history.length - 1];
     const squares = current.squares.map(a => a ? ({...a}) : null); // this.getCopyOfCurrentSquares(); // getCurrentSquares()
-    const player = this.state.xIsNext ? 'X' : 'O';
+    const player = this.nextPlayer();
     const point = {x: x, y: y};
     const i = this.getSquareNumber(point);
     if (squares[i] || current.winner) { // the square was taken
@@ -85,13 +85,25 @@ export class Game extends React.Component {
     }
     squares[i] = new Square({i: i, x: x, y: y, value: player});
     const winner = this.calculateWinner(squares, x, y);
+    const chains = this.updateChains(player, point, squares);
+    let xChains;
+    let oChains;
+    if (this.state.xIsNext) {
+      xChains = this.state.chains.x.slice();
+      oChains = this.state.chains.o.concat(chains);
+    } else {
+      xChains = this.state.chains.x.concat(chains);
+      oChains = this.state.chains.o.slice();
+    }
+    console.log('chains: ', xChains, oChains);
     this.setState({
       history: history.concat([
         {
           squares: squares,
-          winner: winner
+          winner: winner,
         }
       ]),
+      chains: {x: xChains, o: oChains},
       moves: moves.concat([ squares[i] ]),
       stepNumber: history.length,
       xIsNext: !this.state.xIsNext,
@@ -138,6 +150,9 @@ export class Game extends React.Component {
   }
   getPlayer(square) {
     return square && square.value;
+  }
+  nextPlayer() {
+    return this.state.xIsNext ? 'X' : 'O';;
   }
   // Is point within bounds
   isValid(p) {
@@ -219,16 +234,28 @@ export class Game extends React.Component {
     const line = this.patternInDir(point, dir);
     const pattern = patterns[line.pattern];
     console.log('pattern: ', line, ' => ', pattern);
-    const move = pattern ? {point: Utils.move(point, dir, line.shift + pattern.move), rank: pattern.rank} : this.stupidMove();
-    return move;
+    if (pattern) {
+      let patternMove = pattern.move;
+      if (pattern.altMove) {
+        // Compare my team count around the move point - improves a bit, but need offence
+        const cnt1 = this.getCountAround(Utils.move(point, dir, line.shift + pattern.move));
+        const cnt2 = this.getCountAround(Utils.move(point, dir, line.shift + pattern.altMove));
+        console.log('counts: ', cnt1, cnt2)
+        patternMove = cnt2 > cnt1 ? pattern.altMove : patternMove;
+      }
+      return {point: Utils.move(point, dir, line.shift + patternMove), rank: pattern.rank};
+    } else {
+      return this.stupidMove();
+    }
   }
-  patternInDir(point, dir) {
+  patternInDir(point, dir, player) {
     const squares = this.getCurrentSquares();
     const square = this.getSquare(squares, point);
-    const player = this.getPlayer(square);
+    if (!player) player = this.getPlayer(square);
     const line = {
       pattern: '',
-      shift: 1 - this.state.win // index in relation to start, point => 0
+      shift: 1 - this.state.win, // index in relation to start, point => 0
+      dir: dir
     };
     let start = Utils.move(point, dir, line.shift);
     for (let ix = 0; ix < this.state.win * 2 - 1; ix++) {
@@ -252,8 +279,24 @@ export class Game extends React.Component {
     line.pattern = '$' + line.pattern;
     return line;
   }
-  calcChainsBruteForce(player) {
-    const squares = this.getCurrentSquares();
+  getCountAround(point) {
+    const player = this.nextPlayer();
+    let count = 0;
+    directions.forEach(dir => {
+      if (this.getPlayer(this.getSquare(this.getCurrentSquares(), Utils.move(point, dir))) === player) count++;
+      if (this.getPlayer(this.getSquare(this.getCurrentSquares(), Utils.move(point, Utils.reverse(dir)))) === player) count++;
+    })
+    return count;
+  }
+
+  updateChains(player, point, squares) {
+    // Player just made a move - squares have been updated, but the player hasn't been switched
+    // 1. Start only with chains attached to the last move
+    const chains = [];
+    directions.forEach(dir => chains.push(this.patternInDir(point, dir, player)));
+    return chains;
+  }
+  calcChainsBruteForce(player, squares) {
     const playerSquares = squares.filter(s => s != null && s.value === player);
     console.log('playerSquares: ', playerSquares);
   }
